@@ -40,18 +40,23 @@ MOISTURE_SENSOR_1 = VOLT_SENSOR_2
 MOISTURE_SENSOR_2 = VOLT_SENSOR_1
 
 def set_up_logging():
-    # File handler
-    serverlog = logging.FileHandler('garden.log')
-    serverlog.setLevel(logging.DEBUG)
-    serverlog.setFormatter(logging.Formatter(
-        '%(asctime)s %(pathname)s [%(process)d]: %(levelname)s %(message)s'))
+	output_format = logging.Formatter('%(asctime)s %(pathname)s [%(process)d]: %(levelname)s %(message)s')
+	# File handler
+	file_handler = logging.FileHandler('garden.log')
+	file_handler.setLevel(logging.DEBUG)
+	file_handler.setFormatter(output_format)
+		
+	stdout_handler = logging.StreamHandler(sys.stdout)
+	stdout_handler.setLevel(logging.DEBUG)
+	stdout_handler.setFormatter(output_format)
 
-    # Combined logger used elsewhere in the script
-    logger = logging.getLogger('garden-log')
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(serverlog)
+	# Combined logger used elsewhere in the script
+	logger = logging.getLogger('garden-log')
+	logger.setLevel(logging.DEBUG)
+	logger.addHandler(file_handler)	#log to both display and file
+	logger.addHandler(stdout_handler)
 
-    return logger
+	return logger
 	
 #setup io directions and similar init things. gets called at every launch
 def setup_io_init():
@@ -74,7 +79,7 @@ def read_adc_voltage(pin):
 		adc_reading += ADC.read(pin)	 #returns float in 0.0-1.0 range
 	adc_reading /= NUM_SAMPLES_AVG
 	adc_reading *= 1.8	#adc ref is 1.8V
-	logger.info("read ADC %d volts" %adc_reading)
+	logger.debug("read ADC %d volts" %adc_reading)
 	return (adc_reading)
 
 #enforces hysteresis on output actuators
@@ -96,45 +101,58 @@ def check_hysterisis():
 def read_temp_sensor(sensor_id):
 	adc_voltage = read_adc_voltage(sensor_id)
 	celcius = adc_to_temp(adc_voltage*4095.0, 6e3)
+	logger.debug("read temp_sensor %d %dC" %(sensor_id, celcius))
 	return (celcius)
 
 def read_light_sensor(sensor_id):
 	adc_voltage = read_adc_voltage(sensor_id)
 	lux = adc_to_lux(adc_voltage*4095.0, 18e3)
+	logger.debug("read light_sensor %d %d lux" %(sensor_id, lux))
 	return(lux)
 	
 def read_moisture(sensor_id):
 	adc_voltage = read_adc_voltage(sensor_id)
 	arb_humidity_value = convert_volt_to_humidity(adc_voltage)
+	logger.debug("read soil moisture %d %d units" %(sensor_id, arb_humidity_value))
 	return (arb_humidity_value)
 	
 #Actuators	
 def heater(status):	 #status == 1 or 0
 	if (status):
 		GPIO.output(HEATER, GPIO.HIGH)
+		logger.info("heater on")
 	else:
 		GPIO.output(HEATER, GPIO.LOW)
+		logger.info("heater off")
 
 def lamp(status,id):
 	if (status):
 		GPIO.output(id, GPIO.LOW)
+		logger.info("lamp %d on" %id)
 	else:
 		GPIO.output(id, GPIO.HIGH)	
+		logger.info("lamp %d off" %id)
 
 def water_pump(duty):	#PWM duty cycle is between 0-100
 	KICK_START_THRESHOLD = 40	#min duty cycle that the pump can startup at
 	DECAY_COEFF = 0.9 #between 0-1.0
 	ITR_TIME = 0.3 #seconds
-	if (duty > KICK_START_THRESHOLD):
+	if (duty <= 0):
+		PWM.set_duty_cycle(PUMP, 0)
+		logger.info('water pump off. setting duty to %d'%0)
+	elif (duty > KICK_START_THRESHOLD):
 		PWM.set_duty_cycle(PUMP, duty)
+		logger.info('water pump on. setting duty to %d'%duty)
 	else:
 		#ramp down sequence starts with high duty cycle to overcome the stiction and slowly ramps down to the desired duty cycle
+		logger.info('water pump on. ramping down to %d'%duty)
 		while (ramp_down_duty > duty):
 			PWM.set_duty_cycle(PUMP, ramp_down_duty)
 			ramp_down_duty = ramp_down_duty * DECAY_COEFF	# decay iteratively
 			time.sleep(ITR_TIME)	#wait a bit	
+			logger.debug('ramp_down duty %d'%ramp_down_duty)
 		PWM.set_duty_cycle(PUMP, duty)	
-
+		logger.debug('ramp_down duty %d'%duty)
 	
 def adc_to_temp (ADC, R):
 	B = 3470
@@ -144,6 +162,7 @@ def adc_to_temp (ADC, R):
 	log_var = math.log(x,10)
 	temp = (1/T0)+((1/B)*log_var)
 	temp1 = (1/temp)-273.15
+	logger.debug('adc to temp conversion. adc=%d temp =%dC'%(ADC, temp1))
 	return(temp1)
 	
 def adc_to_lux (ADC, R):
@@ -151,6 +170,7 @@ def adc_to_lux (ADC, R):
 	log_var = math.log(x,10)
 	y = (log_var - 4.96)/(-0.6)
 	lux = pow(10,y)
+	logger.debug('adc to lux conversion. adc=%d lux =%d lux'%(ADC, lux))
 	return(lux)
 	
 #SCRIPT BEGINS HERE	
