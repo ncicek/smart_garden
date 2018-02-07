@@ -39,20 +39,19 @@ MOISTURE_SENSOR_1 = VOLT_SENSOR_2
 MOISTURE_SENSOR_2 = VOLT_SENSOR_1
 
 
-
-
 #setup io directions and similar init things. gets called at every launch
 def setup_io_init():
 	PWM.start(PUMP, 0)
 	PWM.set_frequency(PUMP, 1000)
+	water_pump(0)
 	GPIO.setup(HEATER,GPIO.OUT)
 	GPIO.setup(LAMP_1,GPIO.OUT)
-	GPIO.setup(LAMP_2,GPIO.OUT)
-	ADC.setup()
+	GPIO.setup(LAMP_2,GPIO.OUT)	
 	lamp(False, LAMP_1)
 	lamp(False, LAMP_2)
-	water_pump(0)
 	heater(False)
+	ADC.setup()
+	
 
 def read_adc_voltage(pin):
 	adc_reading = 0
@@ -106,14 +105,14 @@ def lamp(status,id):
 	else:
 		GPIO.output(id, GPIO.HIGH)	
 
-def water_pump(duty):	#duty cycle is between 0-100
+def water_pump(duty):	#PWM duty cycle is between 0-100
 	KICK_START_THRESHOLD = 40	#min duty cycle that the pump can startup at
-	DECAY_COEFF = 0.9
-	ITR_TIME = 0.3
+	DECAY_COEFF = 0.9 #between 0-1.0
+	ITR_TIME = 0.3 #seconds
 	if (duty > KICK_START_THRESHOLD):
 		PWM.set_duty_cycle(PUMP, duty)
 	else:
-		#ramp down sequence starts with high duty cycle to overcome the initial motor friction and slowly ramps down to the desired duty cycle
+		#ramp down sequence starts with high duty cycle to overcome the stiction and slowly ramps down to the desired duty cycle
 		while (ramp_down_duty > duty):
 			PWM.set_duty_cycle(PUMP, ramp_down_duty)
 			ramp_down_duty = ramp_down_duty * DECAY_COEFF	# decay iteratively
@@ -141,10 +140,7 @@ def adc_to_lux (ADC, R):
 #SCRIPT BEGINS HERE	
 setup_io_init()
 #loop
-
-
 pdb.set_trace()
-
 
 while(1):
 	#pid_temp = PID.PID(1,2,3)
