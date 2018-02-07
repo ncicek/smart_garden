@@ -3,6 +3,7 @@ import Adafruit_BBIO.GPIO as GPIO
 import Adafruit_BBIO.ADC as ADC
 import Adafruit_BBIO.PWM as PWM 
 import time
+import logging
 
 #CONSTANTS
 NUM_SAMPLES_AVG = 50 #number of readings to average upon any ADC reading
@@ -38,9 +39,23 @@ LIGHT_SENSOR_2 = RES_SENSOR_1
 MOISTURE_SENSOR_1 = VOLT_SENSOR_2
 MOISTURE_SENSOR_2 = VOLT_SENSOR_1
 
+def set_up_logging():
+    # File handler
+    serverlog = logging.FileHandler('garden.log')
+    serverlog.setLevel(logging.DEBUG)
+    serverlog.setFormatter(logging.Formatter(
+        '%(asctime)s %(pathname)s [%(process)d]: %(levelname)s %(message)s'))
 
+    # Combined logger used elsewhere in the script
+    logger = logging.getLogger('garden-log')
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(serverlog)
+
+    return logger
+	
 #setup io directions and similar init things. gets called at every launch
 def setup_io_init():
+	logger.info("Initializing IO")
 	PWM.start(PUMP, 0)
 	PWM.set_frequency(PUMP, 1000)
 	water_pump(0)
@@ -59,6 +74,7 @@ def read_adc_voltage(pin):
 		adc_reading += ADC.read(pin)	 #returns float in 0.0-1.0 range
 	adc_reading /= NUM_SAMPLES_AVG
 	adc_reading *= 1.8	#adc ref is 1.8V
+	logger.info("read ADC %d volts" %adc_reading)
 	return (adc_reading)
 
 #enforces hysteresis on output actuators
@@ -138,6 +154,8 @@ def adc_to_lux (ADC, R):
 	return(lux)
 	
 #SCRIPT BEGINS HERE	
+logger = set_up_logging()
+logger.info("Starting up garden program")
 setup_io_init()
 #loop
 pdb.set_trace()
