@@ -106,8 +106,20 @@ def lamp(status,id):
 	else:
 		GPIO.output(id, GPIO.HIGH)	
 
-def water_pump(duty):
-	PWM.set_duty_cycle(PUMP, duty)
+def water_pump(duty):	#duty cycle is between 0-100
+	KICK_START_THRESHOLD = 40	#min duty cycle that the pump can startup at
+	DECAY_COEFF = 0.9
+	ITR_TIME = 0.3
+	if (duty > KICK_START_THRESHOLD):
+		PWM.set_duty_cycle(PUMP, duty)
+	else:
+		#ramp down sequence starts with high duty cycle to overcome the initial motor friction and slowly ramps down to the desired duty cycle
+		while (ramp_down_duty > duty):
+			PWM.set_duty_cycle(PUMP, ramp_down_duty)
+			ramp_down_duty = ramp_down_duty * DECAY_COEFF	# decay iteratively
+			time.sleep(ITR_TIME)	#wait a bit	
+		PWM.set_duty_cycle(PUMP, duty)	
+
 	
 def adc_to_temp (ADC, R):
 	B = 3470
