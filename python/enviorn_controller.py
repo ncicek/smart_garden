@@ -144,7 +144,7 @@ def water_pump(duty):	#PWM duty cycle is between 0-100
 		PWM.set_duty_cycle(PUMP, duty)
 		logger.info('water pump on. setting duty to %d'%duty)
 	else:
-		#ramp down sequence starts with high duty cycle to overcome the stiction and slowly ramps down to the desired duty cycle
+		#ramp down sequence starts with high duty cycle to overcome motor stiction and quickly ramps down to the desired duty cycle
 		logger.info('water pump on. ramping down to %d'%duty)
 		while (ramp_down_duty > duty):
 			PWM.set_duty_cycle(PUMP, ramp_down_duty)
@@ -176,10 +176,12 @@ def adc_to_lux (ADC, R):
 #SCRIPT BEGINS HERE	
 logger = set_up_logging()
 logger.info("Starting up garden program")
-setup_io_init()
-#loop
-pdb.set_trace()
 
+setup_io_init()
+
+pdb.set_trace()	#debug mode for manual operation
+
+#main loop
 while(1):
 	#pid_temp = PID.PID(1,2,3)
 	
