@@ -6,23 +6,28 @@ garden_settings = {
 	'temp':{
 		'control_method':'manual',	#manual vs auto
 		'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
-		'current_sensor_reading':[10,20]
+		'current_sensor_reading':{'sensor1':10, 'sensor2': 20}
 	},
 	
 	'water':{
 		'control_method':'manual',	#manual vs auto
 		'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
-		'current_sensor_reading':[10,20]
+		'current_sensor_reading':{'sensor1':10, 'sensor2': 20}
 	},
 	
-	'light':{
+	'light_1':{
 		'control_method':'manual',	#manual vs auto
 		'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
-		'current_sensor_reading':[10,20]
+		'current_sensor_reading':10
+	},
+	
+	'light_2':{
+		'control_method':'manual',	#manual vs auto
+		'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
+		'current_sensor_reading':10
 	},
 	
 	'bug_level':0
-
 }
 
 @app.route('/')
@@ -31,7 +36,7 @@ def index():
 
 @app.route('/garden', methods=['GET'])
 def get_settings():
-	return jsonify({'tasks': garden_settings})
+	return jsonify({'garden_settings': garden_settings})
 	
 @app.route('/garden/<string:enviornmental_variable>/<string:mode>/<int:val>', methods=['GET'])
 def set_setting(enviornmental_variable, mode, val):
