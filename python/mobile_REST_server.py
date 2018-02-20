@@ -42,7 +42,7 @@ def get_settings():
 def set_setting(enviornmental_variable, mode, val):
 	if mode in ['auto', 'manual'] and enviornmental_variable in garden_settings:	#at least try some input protection
 		garden_settings[enviornmental_variable]['control_method'] = mode;
-		garden_settings[enviornmental_variable]['setpoint'] = val;
+		garden_settings[enviornmental_variable]['setpoint/power'] = val;
 	else:
 		print("error: failed mode check or variable check")
 	return jsonify({'garden_settings': garden_settings})
