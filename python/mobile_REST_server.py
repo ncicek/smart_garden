@@ -1,3 +1,4 @@
+#credit: https://blog.miguelgrinberg.com/post/designing-a-restful-api-with-python-and-flask
 from flask import Flask, jsonify
 
 app = Flask(__name__)
