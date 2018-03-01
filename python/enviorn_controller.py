@@ -10,10 +10,6 @@ import math
 #CONSTANTS
 NUM_SAMPLES_AVG = 100 #number of readings to average upon any ADC reading
 
-#THRESHOLDS the system will attempt to 
-
-
-
 #ABSTRACT PINS INTO BOARD CONNECTOR NAMES
 RELAY1 = "P9_11"
 RELAY2 = "P9_13"
@@ -169,6 +165,18 @@ def adc_to_lux (ADC, R):
 def adc_to_humidity(ADC):
 	return ADC
 	
+def handle_watering:
+	WATER_TIMER_INTERVAL = 12*60*60 #12hrs
+	
+	handle_watering.current_time = vars(handle_watering).setdefault('current_time',-1)	#init static var
+	handle_watering.previous_time = vars(handle_watering).setdefault('previous_time',-1)	#init static var
+	
+	if handle_watering.current_time > (handle_watering.previous_time + WATER_TIMER_INTERVAL):		
+		previous_time = current_time;
+		water_pump(50);
+	else:
+		water_pump(0);
+		
 #SCRIPT BEGINS HERE	
 logger = set_up_logging()
 logger.info("Starting up garden program")
@@ -179,7 +187,8 @@ pdb.set_trace()	#debug mode for manual operation
 
 #main loop
 while(1):
-	#pid_temp = PID.PID(1,2,3)
+
+	current_time = time.time();
 	
 	if (read_temp_sensor(TEMP_SENSOR_1) > temp_threshold or read_temp_sensor(TEMP_SENSOR_2) > temp_threshold):
 		heater(True)
@@ -191,6 +200,10 @@ while(1):
 	else:
 		lamp(LAMP_1, False)
 		
-		
-		
-		
+	if (read_light_sensor(LIGHT_SENSOR_2) > light_threshold):
+		lamp(LAMP_2, True)
+	else:
+		lamp(LAMP_2, False)	
+	
+	#handle_watering()
+	
