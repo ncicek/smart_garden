@@ -4,9 +4,11 @@ import Adafruit_BBIO.ADC as ADC
 import Adafruit_BBIO.PWM as PWM 
 import time
 import logging
+import sys
+import math
 
 #CONSTANTS
-NUM_SAMPLES_AVG = 50 #number of readings to average upon any ADC reading
+NUM_SAMPLES_AVG = 100 #number of readings to average upon any ADC reading
 
 #THRESHOLDS the system will attempt to 
 
@@ -38,6 +40,13 @@ LIGHT_SENSOR_1 = RES_SENSOR_4
 LIGHT_SENSOR_2 = RES_SENSOR_1
 MOISTURE_SENSOR_1 = VOLT_SENSOR_2
 MOISTURE_SENSOR_2 = VOLT_SENSOR_1
+
+#RESISTOR DIVIDER CALIBRATION
+RESISTOR_CALIBRATION = {'TEMP_SENSOR_1':17.412E3,
+						'TEMP_SENSOR_2':17.484E3,
+						'LIGHT_SENSOR_1':6.011E3,
+						'LIGHT_SENSOR_2':6.009E3
+}
 
 def set_up_logging():
 	output_format = logging.Formatter('%(asctime)s %(pathname)s [%(process)d]: %(levelname)s %(message)s')
@@ -71,7 +80,6 @@ def setup_io_init():
 	lamp(False, LAMP_2)
 	heater(False)
 	ADC.setup()
-	
 
 def read_adc_voltage(pin):
 	adc_reading = 0
@@ -82,38 +90,23 @@ def read_adc_voltage(pin):
 	logger.debug("read ADC %d volts" %adc_reading)
 	return (adc_reading)
 
-#enforces hysteresis on output actuators
-#acts as a safety mechanism to avoid situations where the output toggles excessively fast and burns out relay contacts
-def check_hysterisis():
-	#each output actuator needs its own:
-	#previous_time
-	#previous_state
-	#hysterisis_time
-	#need to make this OO
-	#current_time = time.time()
-	#previous_time = #TODO figure this out
-	if (previous_status != status):	#if the state has changed
-		if (current_time < (previous_time + hysterisis_time)):	#if it has not been that long since the last state change
-			#then do not change the state
-			return(False)
-	return(True)	#otherwise we are good
 #Sensors
 def read_temp_sensor(sensor_id):
 	adc_voltage = read_adc_voltage(sensor_id)
-	celcius = adc_to_temp(adc_voltage*4095.0, 6e3)
-	logger.debug("read temp_sensor %d %dC" %(sensor_id, celcius))
+	celcius = adc_to_temp(adc_voltage*4095.0/1.8, RESISTOR_CALIBRATION(sensor_id))
+	logger.debug("read temp_sensor %s %dC" %(sensor_id, celcius))
 	return (celcius)
 
 def read_light_sensor(sensor_id):
 	adc_voltage = read_adc_voltage(sensor_id)
-	lux = adc_to_lux(adc_voltage*4095.0, 18e3)
-	logger.debug("read light_sensor %d %d lux" %(sensor_id, lux))
+	lux = adc_to_lux(adc_voltage*4095.0/1.8, RESISTOR_CALIBRATION(sensor_id))
+	logger.debug("read light_sensor %s %d lux" %(sensor_id, lux))
 	return(lux)
 	
-def read_moisture(sensor_id):
+def read_moisture_sensor(sensor_id):
 	adc_voltage = read_adc_voltage(sensor_id)
-	arb_humidity_value = convert_volt_to_humidity(adc_voltage)
-	logger.debug("read soil moisture %d %d units" %(sensor_id, arb_humidity_value))
+	arb_humidity_value = adc_to_humidity(adc_voltage)
+	logger.debug("read soil moisture %s %d units" %(sensor_id, arb_humidity_value))
 	return (arb_humidity_value)
 	
 #Actuators	
@@ -128,10 +121,10 @@ def heater(status):	 #status == 1 or 0
 def lamp(status,id):
 	if (status):
 		GPIO.output(id, GPIO.LOW)
-		logger.info("lamp %d on" %id)
+		logger.info("lamp %s on" %id)
 	else:
 		GPIO.output(id, GPIO.HIGH)	
-		logger.info("lamp %d off" %id)
+		logger.info("lamp %s off" %id)
 
 def water_pump(duty):	#PWM duty cycle is between 0-100
 	KICK_START_THRESHOLD = 40	#min duty cycle that the pump can startup at
@@ -159,7 +152,7 @@ def adc_to_temp (ADC, R):
 	T0 = 298.15
 	R0 = 10e3
 	x = ((ADC*R)/(4095-ADC)/R0)
-	log_var = math.log(x,10)
+	log_var = math.log(x,10)	
 	temp = (1/T0)+((1/B)*log_var)
 	temp1 = (1/temp)-273.15
 	logger.debug('adc to temp conversion. adc=%d temp =%dC'%(ADC, temp1))
@@ -173,12 +166,15 @@ def adc_to_lux (ADC, R):
 	logger.debug('adc to lux conversion. adc=%d lux =%d lux'%(ADC, lux))
 	return(lux)
 	
+def adc_to_humidity(ADC):
+	return ADC
+	
 #SCRIPT BEGINS HERE	
 logger = set_up_logging()
 logger.info("Starting up garden program")
 
 setup_io_init()
-
+read_light_sensor(LIGHT_SENSOR_2)
 pdb.set_trace()	#debug mode for manual operation
 
 #main loop
