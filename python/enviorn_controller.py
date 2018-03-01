@@ -38,10 +38,10 @@ MOISTURE_SENSOR_1 = VOLT_SENSOR_2
 MOISTURE_SENSOR_2 = VOLT_SENSOR_1
 
 #RESISTOR DIVIDER CALIBRATION
-RESISTOR_CALIBRATION = {'TEMP_SENSOR_1':17.412E3,
-						'TEMP_SENSOR_2':17.484E3,
-						'LIGHT_SENSOR_1':6.011E3,
-						'LIGHT_SENSOR_2':6.009E3
+RESISTOR_CALIBRATION = {TEMP_SENSOR_1:17.412E3,
+						TEMP_SENSOR_2:17.484E3,
+						LIGHT_SENSOR_1:6.011E3,
+						LIGHT_SENSOR_2:6.009E3
 }
 
 def set_up_logging():
@@ -88,18 +88,21 @@ def read_adc_voltage(pin):
 
 #Sensors
 def read_temp_sensor(sensor_id):
+	assert sensor_id in [TEMP_SENSOR_1,TEMP_SENSOR_2]
 	adc_voltage = read_adc_voltage(sensor_id)
-	celcius = adc_to_temp(adc_voltage*4095.0/1.8, RESISTOR_CALIBRATION(sensor_id))
+	celcius = adc_to_temp(adc_voltage*4095.0/1.8, RESISTOR_CALIBRATION[sensor_id])
 	logger.debug("read temp_sensor %s %dC" %(sensor_id, celcius))
 	return (celcius)
 
 def read_light_sensor(sensor_id):
+	assert sensor_id in [LIGHT_SENSOR_1,LIGHT_SENSOR_2]
 	adc_voltage = read_adc_voltage(sensor_id)
-	lux = adc_to_lux(adc_voltage*4095.0/1.8, RESISTOR_CALIBRATION(sensor_id))
+	lux = adc_to_lux(adc_voltage*4095.0/1.8, RESISTOR_CALIBRATION[sensor_id])
 	logger.debug("read light_sensor %s %d lux" %(sensor_id, lux))
 	return(lux)
 	
 def read_moisture_sensor(sensor_id):
+	assert sensor_id in [MOISTURE_SENSOR_1,MOISTURE_SENSOR_1]
 	adc_voltage = read_adc_voltage(sensor_id)
 	arb_humidity_value = adc_to_humidity(adc_voltage)
 	logger.debug("read soil moisture %s %d units" %(sensor_id, arb_humidity_value))
@@ -165,7 +168,7 @@ def adc_to_lux (ADC, R):
 def adc_to_humidity(ADC):
 	return ADC
 	
-def handle_watering:
+def handle_watering():
 	WATER_TIMER_INTERVAL = 12*60*60 #12hrs
 	
 	handle_watering.current_time = vars(handle_watering).setdefault('current_time',-1)	#init static var
