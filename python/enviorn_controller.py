@@ -2,13 +2,17 @@ import pdb
 import Adafruit_BBIO.GPIO as GPIO
 import Adafruit_BBIO.ADC as ADC
 import Adafruit_BBIO.PWM as PWM 
-import time
+from datetime import datetime, time
+import time as timer
 import logging
 import sys
 import math
 
 #CONSTANTS
-NUM_SAMPLES_AVG = 100 #number of readings to average upon any ADC reading
+NUM_SAMPLES_AVG = 25 #number of readings to average upon any ADC reading
+LIGHT_THRESHOLD = 100
+ADC_DELAY = 0.01
+TEMP_THRESHOLD = 21.5
 
 #ABSTRACT PINS INTO BOARD CONNECTOR NAMES
 RELAY1 = "P9_11"
@@ -81,6 +85,7 @@ def read_adc_voltage(pin):
 	adc_reading = 0
 	for i in range(NUM_SAMPLES_AVG):
 		adc_reading += ADC.read(pin)	 #returns float in 0.0-1.0 range
+		timer.sleep(ADC_DELAY)
 	adc_reading /= NUM_SAMPLES_AVG
 	adc_reading *= 1.8	#adc ref is 1.8V
 	logger.debug("read ADC %d volts" %adc_reading)
@@ -141,7 +146,7 @@ def water_pump(duty):	#PWM duty cycle is between 0-100
 		while (ramp_down_duty > duty):
 			PWM.set_duty_cycle(PUMP, ramp_down_duty)
 			ramp_down_duty = ramp_down_duty * DECAY_COEFF	# decay iteratively
-			time.sleep(ITR_TIME)	#wait a bit	
+			timer.sleep(ITR_TIME)	#wait a bit	
 			logger.debug('ramp_down duty %d'%ramp_down_duty)
 		PWM.set_duty_cycle(PUMP, duty)	
 		logger.debug('ramp_down duty %d'%duty)
@@ -179,34 +184,44 @@ def handle_watering():
 		water_pump(50);
 	else:
 		water_pump(0);
+
+def handle_lighting():
+	now = datetime.now()
+	now_time = now.time()
+	print(now_time)
+	if now_time >= time(8,00) and now_time <= time(10+12,00):	#during the daytime, toggle lamp based on thresholds
+	
+		if (read_light_sensor(LIGHT_SENSOR_1) < LIGHT_THRESHOLD):
+			lamp(True, LAMP_1)
+		else:
+			lamp(False, LAMP_1)
+			
+		if (read_light_sensor(LIGHT_SENSOR_2) < LIGHT_THRESHOLD):
+			lamp(True, LAMP_2)
+		else:
+			lamp(False, LAMP_2)	
 		
+	else:	#at nighttime, let plants catch some ZZZs
+		lamp(False, LAMP_1)	
+		lamp(False, LAMP_2)	
+		
+def handle_heating():
+	if (read_temp_sensor(TEMP_SENSOR_1) > TEMP_THRESHOLD or read_temp_sensor(TEMP_SENSOR_2) > TEMP_THRESHOLD):
+		heater(True)
+	else:
+		heater(False)
+
 #SCRIPT BEGINS HERE	
 logger = set_up_logging()
 logger.info("Starting up garden program")
 
 setup_io_init()
 read_light_sensor(LIGHT_SENSOR_2)
-pdb.set_trace()	#debug mode for manual operation
+#pdb.set_trace()	#debug mode for manual operation
 
 #main loop
 while(1):
-
-	current_time = time.time();
-	
-	if (read_temp_sensor(TEMP_SENSOR_1) > temp_threshold or read_temp_sensor(TEMP_SENSOR_2) > temp_threshold):
-		heater(True)
-	else:
-		heater(False)
-		
-	if (read_light_sensor(LIGHT_SENSOR_1) > light_threshold):
-		lamp(LAMP_1, True)
-	else:
-		lamp(LAMP_1, False)
-		
-	if (read_light_sensor(LIGHT_SENSOR_2) > light_threshold):
-		lamp(LAMP_2, True)
-	else:
-		lamp(LAMP_2, False)	
-	
+	handle_heating()
+	handle_lighting()
 	#handle_watering()
 	
