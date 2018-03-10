@@ -1,13 +1,49 @@
-#credit: https://blog.miguelgrinberg.com/post/designing-a-restful-api-with-python-and-flask
-from flask import Flask, jsonify
+import os
+from flask import Flask, jsonify,send_from_directory, request,redirect,url_for
+from werkzeug.utils import secure_filename
+from PIL import Image
+import pdb
+UPLOAD_FOLDER = 'pics/' #directory which contains all the saved files from clients
+ALLOWED_EXTENSIONS = set([ 'png', 'jpg', 'jpeg',]) #self exploratory
 
 app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+
 
 garden_settings = {}
 
 @app.route('/')
 def index():
 	return "Hello. Server is up :)"
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS	
+
+#example of curl command to upload a local image:
+#curl -v -F "file=@image.jpg" http://localhost:5000/garden/upload
+@app.route('/garden/upload', methods=['GET', 'POST'])
+def upload_file():
+	if request.method == 'POST':
+		# check if the post request has the file part
+		if 'file' not in request.files:
+			return 'not found'
+		file = request.files['file']
+		# if user does not select file, browser also
+		# submit a empty part without filename
+		if file.filename == '':
+			return 'not found1'
+		if file and allowed_file(file.filename):
+			filename = secure_filename(file.filename)
+			file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+			return 'file uploaded successfully'
+
+
+@app.route('/garden/uploads/<filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'],
+                               filename)
 
 @app.route('/garden/<string:enviornmental_variable>/<string:parameter>', methods=['GET'])
 def get_setting(enviornmental_variable, parameter):
@@ -69,9 +105,10 @@ def reset_settings():
 		'bug_level':0
 	}
 	return "Settings reset."
-	
+
+
+
 if __name__ == '__main__':
 	#go
 	reset_settings()
 	app.run(debug=True, host='0.0.0.0')
-	
