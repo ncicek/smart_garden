@@ -8,6 +8,8 @@ import logging
 import sys
 import math
 from subprocess import call, check_output
+import urllib.request
+import json
 
 
 #CONSTANTS
@@ -48,6 +50,43 @@ RESISTOR_CALIBRATION = {TEMP_SENSOR_1:17.412E3,
 						TEMP_SENSOR_2:17.484E3,
 						LIGHT_SENSOR_1:6.011E3,
 						LIGHT_SENSOR_2:6.009E3
+}
+
+server_URL = "http://jdbens.mooo.com"
+
+garden_settings = {
+	#enviornmental_variables
+		#parameters
+		
+	'temp':{
+		'control_method':'auto',	#manual vs auto
+		'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
+		'sensor_1':10,
+		'sensor_2':20
+	},
+	
+	'water':{
+		'control_method':'auto',	#manual vs auto
+		'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
+		'sensor_1':10,
+		'sensor_2':20
+	},
+	
+	'light_1':{
+		'control_method':'auto',	#manual vs auto
+		'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
+		'sensor_1':10
+	},
+	
+	'light_2':{
+		'control_method':'auto',	#manual vs auto
+		'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
+		'sensor_1':10
+	},
+	
+	'bugs':{
+		'level':0
+	}
 }
 
 def set_up_logging():
@@ -188,30 +227,41 @@ def handle_watering():
 		water_pump(0);
 
 def handle_lighting():
-	now = datetime.now()
-	now_time = now.time()
-	print(now_time)
-	if now_time >= time(8,00) and now_time <= time(10+12,00):	#during the daytime, toggle lamp based on thresholds
-	
-		if (read_light_sensor(LIGHT_SENSOR_1) < LIGHT_THRESHOLD):
-			lamp(True, LAMP_1)
-		else:
-			lamp(False, LAMP_1)
-			
-		if (read_light_sensor(LIGHT_SENSOR_2) < LIGHT_THRESHOLD):
-			lamp(True, LAMP_2)
-		else:
-			lamp(False, LAMP_2)	
+	#auto mode
+	if (garden_settings["light_1"]["control_method"] == "auto") or (garden_settings["light_2"]["control_method"] == "auto"):
+		now = datetime.now()
+		now_time = now.time()
+		print(now_time)
+		if now_time >= time(8,00) and now_time <= time(10+12,00):	#during the daytime, toggle lamp based on thresholds
 		
-	else:	#at nighttime, let plants catch some ZZZs
-		lamp(False, LAMP_1)	
-		lamp(False, LAMP_2)	
+			if (garden_settings[light_1][sensor_1] < LIGHT_THRESHOLD):
+				lamp(True, LAMP_1)
+			else:
+				lamp(False, LAMP_1)
+				
+			if (garden_settings[light_2][sensor_1] < LIGHT_THRESHOLD):
+				lamp(True, LAMP_2)
+			else:
+				lamp(False, LAMP_2)	
+			
+		else:	#at nighttime, let plants catch some ZZZs
+			lamp(False, LAMP_1)	
+			lamp(False, LAMP_2)	
+	#manual mode
+	else:	
+		lamp(garden_settings["light_1"]["setpoint/power"]>0, LAMP_1)
+		lamp(garden_settings["light_2"]["setpoint/power"]>0, LAMP_2)
 		
 def handle_heating():
-	if (read_temp_sensor(TEMP_SENSOR_1) > TEMP_THRESHOLD or read_temp_sensor(TEMP_SENSOR_2) > TEMP_THRESHOLD):
-		heater(True)
-	else:
-		heater(False)
+	#auto mode
+	if garden_settings["heater"]["control_method"] == "auto":
+		if (garden_settings[temp][sensor_1] > TEMP_THRESHOLD or garden_settings[temp][sensor_2] > TEMP_THRESHOLD):
+			heater(True)
+		else:
+			heater(False)
+	#manual mode	
+	else:	
+		heater(garden_settings["heater"]["setpoint/power"]>0)
 
 	
 #take a pic, send to server and return bug state
@@ -221,24 +271,60 @@ def check_for_bug():
 	call(["fswebcam","--no-banner","-r 1280x720","bug.jpg"])	 #take pic
 	bug_response = check_output(["curl","-F","file=@bug.jpg","http://localhost:5000/garden/upload"])	#upload to server
 	if bug_response == "detected worm":
+		garden_settings["bugs"]["level"] = 100
 		return True
-	else if bug_response == "no worm detected":
+	elif bug_response == "no worm detected":
+		garden_settings["bugs"]["level"] = 0
 		return False
 	else:
 		raise
+
+
+
+def sync_with_server():
+	#upload sensor data
+	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/temp/sensor_1/" + str(garden_settings["temp"]["sensor_1"])).read()
+	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/temp/sensor_2/" + str(garden_settings["temp"]["sensor_2"])).read()
+	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/water/sensor_1/" + str(garden_settings["water"]["sensor_1"])).read()
+	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/water/sensor_2/" + str(garden_settings["water"]["sensor_2"])).read()
+	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/light_1/sensor_1/" + str(garden_settings["light_1"]["sensor_1"])).read()
+	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/light_2/sensor_1/" + str(garden_settings["light_2"]["sensor_1"])).read()
+	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/bugs/level/" + str(garden_settings["bug_level"])).read()
 	
-	return bug_state
+	#download json response
+	json_response = urllib.request.urlopen(server_URL + "/garden").read().decode()
+	json_response_dict = json.loads(json_response)["garden_settings"]	#parse to dict
+
+	#update local garden_settings dict with values from response
+	garden_settings["temp"]["control_method"] = json_response_dict["temp"]["control_method"]
+	garden_settings["temp"]["setpoint/power"] = json_response_dict["temp"]["setpoint/power"]
+	garden_settings["water"]["control_method"] = json_response_dict["water"]["control_method"]
+	garden_settings["water"]["setpoint/power"] = json_response_dict["water"]["setpoint/power"]
+	garden_settings["light_1"]["control_method"] = json_response_dict["light_1"]["control_method"]
+	garden_settings["light_2"]["setpoint/power"] = json_response_dict["light_2"]["setpoint/power"]
+		
+	
+def read_all_sensors():
+	#read all sensors and update the garden_settings dictionary
+	garden_settings[temp][sensor_1] = read_temp_sensor(TEMP_SENSOR_1)
+	garden_settings[temp][sensor_2] = read_temp_sensor(TEMP_SENSOR_2)
+	garden_settings[water][sensor_1] = read_moisture_sensor(MOISTURE_SENSOR_1)
+	garden_settings[water][sensor_2] = read_moisture_sensor(MOISTURE_SENSOR_2)
+	garden_settings[light_1][sensor_1] = read_light_sensor(LIGHT_SENSOR_1)
+	garden_settings[light_2][sensor_1] = read_light_sensor(LIGHT_SENSOR_2)
 	
 #SCRIPT BEGINS HERE	
+
 logger = set_up_logging()
 logger.info("Starting up garden program")
 
 setup_io_init()
-read_light_sensor(LIGHT_SENSOR_2)
-#pdb.set_trace()	#debug mode for manual operation
 
 #main loop
 while(1):
+	read_all_sensors()
+	sync_with_server()
+	
 	handle_heating()
 	handle_lighting()
 	check_for_bug()

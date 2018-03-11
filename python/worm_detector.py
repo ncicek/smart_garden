@@ -1,13 +1,5 @@
-
-# coding: utf-8
-
-# # Object Detection Demo
-# Welcome to the object detection inference walkthrough!  This notebook will walk you step by step through the process of using a pre-trained model to detect objects in an image. Make sure to follow the [installation instructions](https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/installation.md) before you start.
-
-# # Imports
-
-# In[11]:
-
+#Garden server
+#runs bug detection server and mobile app server
 
 import numpy as np
 import os
@@ -160,8 +152,19 @@ def set_setting(enviornmental_variable, mode, val):
 		garden_settings[enviornmental_variable]['setpoint/power'] = val;
 	else:
 		print("error: failed mode check or variable check")
+		return 'error'
 	return jsonify({'garden_settings': garden_settings})
 
+@app.route('/garden_RESTful_write/<string:enviornmental_variable>/<string:param>/<int:val>', methods=['GET'])
+def set_setting_RESTful(enviornmental_variable, param, val):
+	if enviornmental_variable in garden_settings:
+		if param in garden_settings[enviornmental_variable]:
+			garden_settings[enviornmental_variable][param] = val;
+	else:
+		print("error: failed restful dict check")
+		return 'error'
+	return jsonify({'garden_settings': garden_settings})
+	
 @app.route('/garden', methods=['GET'])
 def get_json():
 	return jsonify({'garden_settings': garden_settings})
@@ -178,36 +181,37 @@ def reset_settings():
 			#parameters
 			
 		'temp':{
-			'control_method':'manual',	#manual vs auto
+			'control_method':'auto',	#manual vs auto
 			'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
 			'sensor_1':10,
 			'sensor_2':20
 		},
 		
 		'water':{
-			'control_method':'manual',	#manual vs auto
+			'control_method':'auto',	#manual vs auto
 			'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
 			'sensor_1':10,
 			'sensor_2':20
 		},
 		
 		'light_1':{
-			'control_method':'manual',	#manual vs auto
+			'control_method':'auto',	#manual vs auto
 			'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
 			'sensor_1':10
 		},
 		
 		'light_2':{
-			'control_method':'manual',	#manual vs auto
+			'control_method':'auto',	#manual vs auto
 			'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
 			'sensor_1':10
 		},
 		
-		'bug_level':0
+		'bugs':{
+			'level':0
+		}
 	}
 	return "Settings reset."
-
-
+	
 def load_image_into_numpy_array(image):
   (im_width, im_height) = image.size
   return np.array(image.getdata()).reshape(
