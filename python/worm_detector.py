@@ -21,112 +21,20 @@ from collections import defaultdict
 from io import StringIO
 from PIL import Image
 from object_detection.utils import ops as utils_ops
+import os
+from flask import Flask, jsonify,send_from_directory, request,redirect,url_for
+from werkzeug.utils import secure_filename
 
 if tf.__version__ < '1.4.0':
   raise ImportError('Please upgrade your tensorflow installation to v1.4.* or later!')
 
-
-# ## Env setup
-
-# In[12]:
-
-
-
-# This is needed since the notebook is stored in the object_detection folder.
 sys.path.append("..")
-
-
-# ## Object detection imports
-# Here are the imports from the object detection module.
-
-# In[13]:
 
 
 from utils import label_map_util
 
 from utils import visualization_utils as vis_util
 
-
-# # Model preparation 
-
-# ## Variables
-# 
-# Any model exported using the `export_inference_graph.py` tool can be loaded here simply by changing `PATH_TO_CKPT` to point to a new .pb file.  
-# 
-# By default we use an "SSD with Mobilenet" model here. See the [detection model zoo](https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/detection_model_zoo.md) for a list of other models that can be run out-of-the-box with varying speeds and accuracies.
-
-# In[14]:
-
-
-# What model to download.
-MODEL_NAME = 'worm_graph'
-MODEL_FILE = MODEL_NAME + '.tar.gz'
-
-
-# Path to frozen detection graph. This is the actual model that is used for the object detection.
-PATH_TO_CKPT = MODEL_NAME + '/frozen_inference_graph.pb'
-
-# List of the strings that is used to add correct label for each box.
-PATH_TO_LABELS = os.path.join('training', 'object-detection.pbtxt')
-
-NUM_CLASSES = 1
-
-
-# ## Download Model
-
-# ## Load a (frozen) Tensorflow model into memory.
-
-# In[15]:
-
-
-detection_graph = tf.Graph()
-with detection_graph.as_default():
-  od_graph_def = tf.GraphDef()
-  with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
-    serialized_graph = fid.read()
-    od_graph_def.ParseFromString(serialized_graph)
-    tf.import_graph_def(od_graph_def, name='')
-
-
-# ## Loading label map
-# Label maps map indices to category names, so that when our convolution network predicts `5`, we know that this corresponds to `airplane`.  Here we use internal utility functions, but anything that returns a dictionary mapping integers to appropriate string labels would be fine
-
-# In[16]:
-
-
-label_map = label_map_util.load_labelmap(PATH_TO_LABELS)
-categories = label_map_util.convert_label_map_to_categories(label_map, max_num_classes=NUM_CLASSES, use_display_name=True)
-category_index = label_map_util.create_category_index(categories)
-
-
-# ## Helper code
-
-# In[17]:
-
-
-def load_image_into_numpy_array(image):
-  (im_width, im_height) = image.size
-  return np.array(image.getdata()).reshape(
-      (im_height, im_width, 3)).astype(np.uint8)
-
-
-# # Detection
-
-# In[18]:
-
-
-# For the sake of simplicity we will use only 2 images:
-# image1.jpg
-# image2.jpg
-# If you want to test the code with your images, just add path to the images to the TEST_IMAGE_PATHS.
-PATH_TO_TEST_IMAGES_DIR = 'test_images'
-TEST_IMAGE_PATHS = [ os.path.join(PATH_TO_TEST_IMAGES_DIR, 'image{}.jpg'.format(i)) for i in range(3, 5) ]
-
-# Size, in inches, of the output images.
-IMAGE_SIZE = (12, 8)
-
-
-# In[19]:
 
 
 def run_inference_for_single_image(image, graph):
@@ -178,8 +86,7 @@ def run_inference_for_single_image(image, graph):
 
 # In[20]:
 
-
-	for image_path in TEST_IMAGE_PATHS:
+def findWorm(image_path):
 	image = Image.open(image_path)
 	# the array based representation of the image will be used later in order to prepare the
 	# result image with boxes and labels on it.
@@ -191,10 +98,140 @@ def run_inference_for_single_image(image, graph):
 	# Visualization of the results of a detection.
 	confidence_level = output_dict['detection_scores'][0];
 	if ( confidence_level> 0.5):
-		print ("detected worm")
+		 return "detected worm"
 	else:
-		print ("no worm detected")
+		return "no worm detected"
   
-  
-  
+ 
+UPLOAD_FOLDER = 'pics/' #directory which contains all the saved files from clients
+ALLOWED_EXTENSIONS = set([ 'png', 'jpg', 'jpeg',]) #self exploratory
+
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+
+
+garden_settings = {}
+
+@app.route('/')
+def index():
+	return "Hello. Server is up :)"
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS	
+
+#example of curl command to upload a local image:
+#curl -v -F "file=@image.jpg" http://localhost:5000/garden/upload
+@app.route('/garden/upload', methods=['GET', 'POST'])
+def upload_file():
+	if request.method == 'POST':
+		# check if the post request has the file part
+		if 'file' not in request.files:
+			return 'not found'
+		file = request.files['file']
+		if file.filename == '':
+			return 'not found1'
+		if file and allowed_file(file.filename):
+			filename = secure_filename(file.filename)
+			path_to_file = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+			file.save(path_to_file)
+			result = findWorm(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+			os.remove(path_to_file)
+			return result
+
+
+@app.route('/garden/uploads/<filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'],
+                               filename)
+
+@app.route('/garden/<string:enviornmental_variable>/<string:parameter>', methods=['GET'])
+def get_setting(enviornmental_variable, parameter):
+	if enviornmental_variable in garden_settings:
+		if parameter in garden_settings[enviornmental_variable]:
+			return(str(garden_settings[enviornmental_variable][parameter]))
+	return 'error'
+
+@app.route('/garden/<string:enviornmental_variable>/<string:mode>/<int:val>', methods=['GET'])
+def set_setting(enviornmental_variable, mode, val):
+	if mode in ['auto', 'manual'] and enviornmental_variable in garden_settings:	#at least try some input protection
+		garden_settings[enviornmental_variable]['control_method'] = mode;
+		garden_settings[enviornmental_variable]['setpoint/power'] = val;
+	else:
+		print("error: failed mode check or variable check")
+	return jsonify({'garden_settings': garden_settings})
+
+@app.route('/garden', methods=['GET'])
+def get_json():
+	return jsonify({'garden_settings': garden_settings})
+	
+@app.route('/garden/test', methods=['GET'])
+def test_number():
+	return "12345"
+	
+@app.route('/garden/reset_settings')
+def reset_settings():
+	global garden_settings 
+	garden_settings = {
+		#enviornmental_variables
+			#parameters
+			
+		'temp':{
+			'control_method':'manual',	#manual vs auto
+			'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
+			'sensor_1':10,
+			'sensor_2':20
+		},
+		
+		'water':{
+			'control_method':'manual',	#manual vs auto
+			'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
+			'sensor_1':10,
+			'sensor_2':20
+		},
+		
+		'light_1':{
+			'control_method':'manual',	#manual vs auto
+			'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
+			'sensor_1':10
+		},
+		
+		'light_2':{
+			'control_method':'manual',	#manual vs auto
+			'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
+			'sensor_1':10
+		},
+		
+		'bug_level':0
+	}
+	return "Settings reset."
+
+
+def load_image_into_numpy_array(image):
+  (im_width, im_height) = image.size
+  return np.array(image.getdata()).reshape(
+      (im_height, im_width, 3)).astype(np.uint8)
+	  
+	  
+if __name__ == '__main__':
+	MODEL_NAME = 'worm_graph'
+	MODEL_FILE = MODEL_NAME + '.tar.gz'
+	PATH_TO_CKPT = MODEL_NAME + '/frozen_inference_graph.pb'
+	PATH_TO_LABELS = os.path.join('training', 'object-detection.pbtxt')
+	NUM_CLASSES = 1
+	detection_graph = tf.Graph()
+	with detection_graph.as_default():
+		od_graph_def = tf.GraphDef()
+		with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
+			serialized_graph = fid.read()
+			od_graph_def.ParseFromString(serialized_graph)
+			tf.import_graph_def(od_graph_def, name='')
+	label_map = label_map_util.load_labelmap(PATH_TO_LABELS)
+	categories = label_map_util.convert_label_map_to_categories(label_map, max_num_classes=NUM_CLASSES, use_display_name=True)
+	category_index = label_map_util.create_category_index(categories)
+# Size, in inches, of the output images.
+	IMAGE_SIZE = (12, 8)
+	reset_settings()
+	app.run(debug=True, host='0.0.0.0')
 
