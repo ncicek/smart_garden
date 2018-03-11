@@ -7,6 +7,8 @@ import time as timer
 import logging
 import sys
 import math
+from subprocess import call, check_output
+
 
 #CONSTANTS
 NUM_SAMPLES_AVG = 25 #number of readings to average upon any ADC reading
@@ -211,6 +213,22 @@ def handle_heating():
 	else:
 		heater(False)
 
+	
+#take a pic, send to server and return bug state
+def check_for_bug():
+	#curl -F "file=@image.jpg" http://localhost:5000/garden/upload
+
+	call(["fswebcam","--no-banner","-r 1280x720","bug.jpg"])	 #take pic
+	bug_response = check_output(["curl","-F","file=@bug.jpg","http://localhost:5000/garden/upload"])	#upload to server
+	if bug_response == "detected worm":
+		return True
+	else if bug_response == "no worm detected":
+		return False
+	else:
+		raise
+	
+	return bug_state
+	
 #SCRIPT BEGINS HERE	
 logger = set_up_logging()
 logger.info("Starting up garden program")
@@ -223,5 +241,6 @@ read_light_sensor(LIGHT_SENSOR_2)
 while(1):
 	handle_heating()
 	handle_lighting()
+	check_for_bug()
 	#handle_watering()
 	
