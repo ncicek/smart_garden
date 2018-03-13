@@ -16,6 +16,8 @@ from object_detection.utils import ops as utils_ops
 import os
 from flask import Flask, jsonify,send_from_directory, request,redirect,url_for
 from werkzeug.utils import secure_filename
+import time
+
 
 if tf.__version__ < '1.4.0':
   raise ImportError('Please upgrade your tensorflow installation to v1.4.* or later!')
@@ -88,11 +90,8 @@ def findWorm(image_path):
 	# Actual detection.
 	output_dict = run_inference_for_single_image(image_np, detection_graph)
 	# Visualization of the results of a detection.
-	confidence_level = output_dict['detection_scores'][0];
-	if ( confidence_level> 0.5):
-		 return "detected worm"
-	else:
-		return "no worm detected"
+	detection_scores = output_dict['detection_scores'];
+	return detection_scores
   
  
 UPLOAD_FOLDER = 'pics/' #directory which contains all the saved files from clients
@@ -126,11 +125,12 @@ def upload_file():
 			return 'not found1'
 		if file and allowed_file(file.filename):
 			filename = secure_filename(file.filename)
+			print(filename)
 			path_to_file = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 			file.save(path_to_file)
-			result = findWorm(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-			os.remove(path_to_file)
-			return result
+			print("save complete")
+			detection_scores = findWorm(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+			return str(detection_scores)
 
 
 @app.route('/garden/uploads/<filename>')
@@ -155,11 +155,11 @@ def set_setting(enviornmental_variable, mode, val):
 		return 'error'
 	return jsonify({'garden_settings': garden_settings})
 
-@app.route('/garden_RESTful_write/<string:enviornmental_variable>/<string:param>/<int:val>', methods=['GET'])
+@app.route('/garden_RESTful_write/<string:enviornmental_variable>/<string:param>/<string:val>', methods=['GET'])
 def set_setting_RESTful(enviornmental_variable, param, val):
 	if enviornmental_variable in garden_settings:
 		if param in garden_settings[enviornmental_variable]:
-			garden_settings[enviornmental_variable][param] = val;
+			garden_settings[enviornmental_variable][param] = float(val);
 	else:
 		print("error: failed restful dict check")
 		return 'error'
@@ -217,7 +217,12 @@ def load_image_into_numpy_array(image):
   return np.array(image.getdata()).reshape(
       (im_height, im_width, 3)).astype(np.uint8)
 	  
-	  
+
+@app.route('/garden/time', methods=['GET'])
+def get_time():
+	return str(int(time.time()))
+
+
 if __name__ == '__main__':
 	MODEL_NAME = 'worm_graph'
 	MODEL_FILE = MODEL_NAME + '.tar.gz'
@@ -237,5 +242,5 @@ if __name__ == '__main__':
 # Size, in inches, of the output images.
 	IMAGE_SIZE = (12, 8)
 	reset_settings()
-	app.run(debug=True, host='0.0.0.0')
+	app.run(debug=True, host='0.0.0.0',threaded=True)
 
