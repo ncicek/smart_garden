@@ -10,13 +10,13 @@ import math
 from subprocess import call, check_output
 import urllib.request
 import json
+import csv
 
+#
 
 #CONSTANTS
 NUM_SAMPLES_AVG = 25 #number of readings to average upon any ADC reading
-LIGHT_THRESHOLD = 100
 ADC_DELAY = 0.01
-TEMP_THRESHOLD = 21.5
 
 #ABSTRACT PINS INTO BOARD CONNECTOR NAMES
 RELAY1 = "P9_11"
@@ -52,7 +52,7 @@ RESISTOR_CALIBRATION = {TEMP_SENSOR_1:17.412E3,
 						LIGHT_SENSOR_2:6.009E3
 }
 
-server_URL = "http://jdbens.mooo.com"
+server_URL = "http://192.168.1.102:5000"
 
 garden_settings = {
 	#enviornmental_variables
@@ -148,7 +148,7 @@ def read_light_sensor(sensor_id):
 	return(lux)
 	
 def read_moisture_sensor(sensor_id):
-	assert sensor_id in [MOISTURE_SENSOR_1,MOISTURE_SENSOR_1]
+	assert sensor_id in [MOISTURE_SENSOR_1,MOISTURE_SENSOR_2]
 	adc_voltage = read_adc_voltage(sensor_id)
 	arb_humidity_value = adc_to_humidity(adc_voltage)
 	logger.debug("read soil moisture %s %d units" %(sensor_id, arb_humidity_value))
@@ -163,9 +163,10 @@ def heater(status):	 #status == 1 or 0
 		GPIO.output(HEATER, GPIO.LOW)
 		logger.info("heater off")
 
+
 def lamp(status,id):
 	if (status):
-		GPIO.output(id, GPIO.LOW)
+		GPIO.output(id, GPIO.LOW) #relay inputs are active low
 		logger.info("lamp %s on" %id)
 	else:
 		GPIO.output(id, GPIO.HIGH)	
@@ -232,19 +233,21 @@ def handle_lighting():
 		now = datetime.now()
 		now_time = now.time()
 		print(now_time)
-		if now_time >= time(8,00) and now_time <= time(10+12,00):	#during the daytime, toggle lamp based on thresholds
-		
-			if (garden_settings[light_1][sensor_1] < LIGHT_THRESHOLD):
+		print(time(10+4+12-24,00))
+		if ~(now_time >= time(8+4,00) and now_time <= time(7+4+12,00)):	#during the daytime, toggle lamp based on thresholds
+			print("daytime")
+			if (garden_settings['light_1']['sensor_1'] < garden_settings['light_1']['setpoint/power']):
 				lamp(True, LAMP_1)
 			else:
 				lamp(False, LAMP_1)
 				
-			if (garden_settings[light_2][sensor_1] < LIGHT_THRESHOLD):
+			if (garden_settings['light_2']['sensor_1'] < garden_settings['light_2']['setpoint/power']):
 				lamp(True, LAMP_2)
 			else:
 				lamp(False, LAMP_2)	
 			
 		else:	#at nighttime, let plants catch some ZZZs
+			print("nightitme")
 			lamp(False, LAMP_1)	
 			lamp(False, LAMP_2)	
 	#manual mode
@@ -254,22 +257,27 @@ def handle_lighting():
 		
 def handle_heating():
 	#auto mode
-	if garden_settings["heater"]["control_method"] == "auto":
-		if (garden_settings[temp][sensor_1] > TEMP_THRESHOLD or garden_settings[temp][sensor_2] > TEMP_THRESHOLD):
-			heater(True)
-		else:
+	if garden_settings["temp"]["control_method"] == "auto":
+		if (garden_settings["temp"]["sensor_1"] > garden_settings['temp']['setpoint/power'] or garden_settings['temp']['sensor_2'] > garden_settings['temp']['setpoint/power']):
 			heater(False)
+		else:
+			heater(True)
 	#manual mode	
 	else:	
-		heater(garden_settings["heater"]["setpoint/power"]>0)
+		heater(garden_settings["temp"]["setpoint/power"]>0)
 
 	
 #take a pic, send to server and return bug state
 def check_for_bug():
+	logger.debug('checking for bug')
 	#curl -F "file=@image.jpg" http://localhost:5000/garden/upload
 
-	call(["fswebcam","--no-banner","-r 1280x720","bug.jpg"])	 #take pic
-	bug_response = check_output(["curl","-F","file=@bug.jpg","http://localhost:5000/garden/upload"])	#upload to server
+	logger.debug('fswebcam')
+	call(["fswebcam","--no-banner","-r 640x480","bug.jpg"])	 #take pic
+	logger.debug('curling')
+	bug_response = check_output(["curl","-F","file=@bug.jpg",server_URL+"/garden/upload"])	#upload to server
+	bug_response = bug_response.decode('UTF-8')
+	logger.debug('got curl response')
 	if bug_response == "detected worm":
 		garden_settings["bugs"]["level"] = 100
 		return True
@@ -279,44 +287,87 @@ def check_for_bug():
 	else:
 		raise
 
-
+		
+def sync_time_from_server():
+	received_time = urllib.request.urlopen(server_URL + "/garden/time").read().decode()
+	received_time = str(received_time)
+	logger.debug("Setting time to: " + received_time)
+	#["sudo", "date", "-s", "Thu Aug  9 21:31:26 UTC 2012"]
+	#date -s '@2147483647'
+	call(["date","-s","@" + received_time])	 #take pic
+	
 
 def sync_with_server():
-	#upload sensor data
+	logger.debug('syncing with server')
+	logger.debug('uploading sensors')
+	print(server_URL + "/garden_RESTful_write" + "/temp/sensor_1/" + str(garden_settings["temp"]["sensor_1"]))
 	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/temp/sensor_1/" + str(garden_settings["temp"]["sensor_1"])).read()
 	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/temp/sensor_2/" + str(garden_settings["temp"]["sensor_2"])).read()
 	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/water/sensor_1/" + str(garden_settings["water"]["sensor_1"])).read()
 	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/water/sensor_2/" + str(garden_settings["water"]["sensor_2"])).read()
 	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/light_1/sensor_1/" + str(garden_settings["light_1"]["sensor_1"])).read()
 	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/light_2/sensor_1/" + str(garden_settings["light_2"]["sensor_1"])).read()
-	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/bugs/level/" + str(garden_settings["bug_level"])).read()
+	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/bugs/level/" + str(garden_settings["bugs"]["level"])).read()
 	
 	#download json response
+	logger.debug('downloading setpoints')
 	json_response = urllib.request.urlopen(server_URL + "/garden").read().decode()
 	json_response_dict = json.loads(json_response)["garden_settings"]	#parse to dict
 
 	#update local garden_settings dict with values from response
+	logger.debug('refresh local dict')
 	garden_settings["temp"]["control_method"] = json_response_dict["temp"]["control_method"]
 	garden_settings["temp"]["setpoint/power"] = json_response_dict["temp"]["setpoint/power"]
 	garden_settings["water"]["control_method"] = json_response_dict["water"]["control_method"]
 	garden_settings["water"]["setpoint/power"] = json_response_dict["water"]["setpoint/power"]
+	garden_settings["light_1"]["setpoint/power"] = json_response_dict["light_1"]["setpoint/power"]
 	garden_settings["light_1"]["control_method"] = json_response_dict["light_1"]["control_method"]
 	garden_settings["light_2"]["setpoint/power"] = json_response_dict["light_2"]["setpoint/power"]
+	garden_settings["light_2"]["control_method"] = json_response_dict["light_2"]["control_method"]
 		
 	
 def read_all_sensors():
 	#read all sensors and update the garden_settings dictionary
-	garden_settings[temp][sensor_1] = read_temp_sensor(TEMP_SENSOR_1)
-	garden_settings[temp][sensor_2] = read_temp_sensor(TEMP_SENSOR_2)
-	garden_settings[water][sensor_1] = read_moisture_sensor(MOISTURE_SENSOR_1)
-	garden_settings[water][sensor_2] = read_moisture_sensor(MOISTURE_SENSOR_2)
-	garden_settings[light_1][sensor_1] = read_light_sensor(LIGHT_SENSOR_1)
-	garden_settings[light_2][sensor_1] = read_light_sensor(LIGHT_SENSOR_2)
+	garden_settings["temp"]["sensor_1"] = read_temp_sensor(TEMP_SENSOR_1)
+	garden_settings["temp"]["sensor_2"] = read_temp_sensor(TEMP_SENSOR_2)
+	garden_settings["water"]["sensor_1"] = read_moisture_sensor(MOISTURE_SENSOR_1)
+	garden_settings["water"]["sensor_2"] = read_moisture_sensor(MOISTURE_SENSOR_2)
+	garden_settings["light_1"]["sensor_1"] = read_light_sensor(LIGHT_SENSOR_1)
+	garden_settings["light_2"]["sensor_1"] = read_light_sensor(LIGHT_SENSOR_2)
 	
-#SCRIPT BEGINS HERE	
+def pretty(d, indent=0):
+   for key, value in d.items():
+      print('\t' * indent + str(key))
+      if isinstance(value, dict):
+         pretty(value, indent+1)
+      else:
+        print('\t' * (indent+1) + str(value))
 
+def flatten(current, key, result):
+    if isinstance(current, dict):
+        for k in current:
+            new_key = "{0}.{1}".format(key, k) if len(key) > 0 else k
+            flatten(current[k], new_key, result)
+    else:
+        result[key] = current
+    return result
+
+def csv_handler():
+	with open(filename,'a', newline='') as csvfile:
+		csvwriter = csv.writer(csvfile,['temp_sensor_1','temp_sensor_2'])
+		csvwriter.writerow(flatten(garden_settings, '', {}))
+		 
+#SCRIPT BEGINS HERE	
+		
 logger = set_up_logging()
 logger.info("Starting up garden program")
+sync_time_from_server()
+
+#init csv
+filename = "garden_log_" + str(datetime.now()) + ".txt"
+with open(filename,'w', newline='') as csvfile:
+		csvwriter = csv.writer(csvfile)
+		csvwriter.writerow([["header"]])
 
 setup_io_init()
 
@@ -327,6 +378,9 @@ while(1):
 	
 	handle_heating()
 	handle_lighting()
+	#pretty(garden_settings)
+	csv_handler()
+	#print(garden_settings['light_1']['setpoint/power'])
 	check_for_bug()
 	#handle_watering()
 	
