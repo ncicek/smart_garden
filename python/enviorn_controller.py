@@ -1,3 +1,5 @@
+#takes one argument: mode=logger or server
+
 import pdb
 import Adafruit_BBIO.GPIO as GPIO
 import Adafruit_BBIO.ADC as ADC
@@ -7,16 +9,18 @@ import time as timer
 import logging
 import sys
 import math
-from subprocess import call, check_output
+#from subprocess import call, check_output
+import subprocess
 import urllib.request
 import json
 import csv
 
-#
 
 #CONSTANTS
-NUM_SAMPLES_AVG = 25 #number of readings to average upon any ADC reading
-ADC_DELAY = 0.01
+LOGGER_INTERVAL = 1.0 #used in logger mode seconds
+
+NUM_SAMPLES_AVG = 20 #number of readings to average upon any ADC reading
+ADC_DELAY = 0.005
 
 #ABSTRACT PINS INTO BOARD CONNECTOR NAMES
 RELAY1 = "P9_11"
@@ -50,6 +54,14 @@ RESISTOR_CALIBRATION = {TEMP_SENSOR_1:17.412E3,
 						TEMP_SENSOR_2:17.484E3,
 						LIGHT_SENSOR_1:6.011E3,
 						LIGHT_SENSOR_2:6.009E3
+}
+
+#track states for logging garbage way
+actuator_state = {
+	'heater':False,
+	'lamp_1':False,
+	'lamp_2':False,
+	'pump':False
 }
 
 server_URL = "http://192.168.1.102:5000"
@@ -102,7 +114,7 @@ def set_up_logging():
 
 	# Combined logger used elsewhere in the script
 	logger = logging.getLogger('garden-log')
-	logger.setLevel(logging.DEBUG)
+	logger.setLevel(logging.INFO)
 	logger.addHandler(file_handler)	#log to both display and file
 	logger.addHandler(stdout_handler)
 
@@ -157,14 +169,25 @@ def read_moisture_sensor(sensor_id):
 #Actuators	
 def heater(status):	 #status == 1 or 0
 	if (status):
+		actuator_state['heater'] = True;
 		GPIO.output(HEATER, GPIO.HIGH)
 		logger.info("heater on")
 	else:
+		actuator_state['heater'] = False;
 		GPIO.output(HEATER, GPIO.LOW)
 		logger.info("heater off")
 
 
 def lamp(status,id):
+	if id == LAMP_1:
+		idx = 'lamp_1'
+	elif id == LAMP_2:
+		idx = 'lamp_2'
+	else:
+		raise
+		
+	actuator_state[idx] = status;
+	
 	if (status):
 		GPIO.output(id, GPIO.LOW) #relay inputs are active low
 		logger.info("lamp %s on" %id)
@@ -177,12 +200,15 @@ def water_pump(duty):	#PWM duty cycle is between 0-100
 	DECAY_COEFF = 0.9 #between 0-1.0
 	ITR_TIME = 0.3 #seconds
 	if (duty <= 0):
+		actuator_state['pump'] = False;
 		PWM.set_duty_cycle(PUMP, 0)
 		logger.info('water pump off. setting duty to %d'%0)
 	elif (duty > KICK_START_THRESHOLD):
+		actuator_state['pump'] = True;
 		PWM.set_duty_cycle(PUMP, duty)
 		logger.info('water pump on. setting duty to %d'%duty)
 	else:
+		actuator_state['pump'] = True;
 		#ramp down sequence starts with high duty cycle to overcome motor stiction and quickly ramps down to the desired duty cycle
 		logger.info('water pump on. ramping down to %d'%duty)
 		while (ramp_down_duty > duty):
@@ -232,10 +258,9 @@ def handle_lighting():
 	if (garden_settings["light_1"]["control_method"] == "auto") or (garden_settings["light_2"]["control_method"] == "auto"):
 		now = datetime.now()
 		now_time = now.time()
-		print(now_time)
-		print(time(10+4+12-24,00))
+		#print(now_time)
+		#print(time(10+4+12-24,00))
 		if ~(now_time >= time(8+4,00) and now_time <= time(7+4+12,00)):	#during the daytime, toggle lamp based on thresholds
-			print("daytime")
 			if (garden_settings['light_1']['sensor_1'] < garden_settings['light_1']['setpoint/power']):
 				lamp(True, LAMP_1)
 			else:
@@ -258,6 +283,7 @@ def handle_lighting():
 def handle_heating():
 	#auto mode
 	if garden_settings["temp"]["control_method"] == "auto":
+		print(garden_settings["temp"]["sensor_1"],garden_settings["temp"]["sensor_2"],garden_settings['temp']['setpoint/power'])
 		if (garden_settings["temp"]["sensor_1"] > garden_settings['temp']['setpoint/power'] or garden_settings['temp']['sensor_2'] > garden_settings['temp']['setpoint/power']):
 			heater(False)
 		else:
@@ -273,16 +299,18 @@ def check_for_bug():
 	#curl -F "file=@image.jpg" http://localhost:5000/garden/upload
 
 	logger.debug('fswebcam')
-	call(["fswebcam","--no-banner","-r 640x480","bug.jpg"])	 #take pic
+	subprocess.check_output(["fswebcam","--no-banner","-r 640x480","bug.jpg"])	 #take pic
 	logger.debug('curling')
-	bug_response = check_output(["curl","-F","file=@bug.jpg",server_URL+"/garden/upload"])	#upload to server
+	bug_response = subprocess.check_output(["curl","-F","file=@bug.jpg",server_URL+"/garden/upload"])	#upload to server
 	bug_response = bug_response.decode('UTF-8')
 	logger.debug('got curl response')
 	if bug_response == "detected worm":
 		garden_settings["bugs"]["level"] = 100
+		print("Detected Bug!")
 		return True
 	elif bug_response == "no worm detected":
 		garden_settings["bugs"]["level"] = 0
+		print("No worm")
 		return False
 	else:
 		raise
@@ -294,7 +322,7 @@ def sync_time_from_server():
 	logger.debug("Setting time to: " + received_time)
 	#["sudo", "date", "-s", "Thu Aug  9 21:31:26 UTC 2012"]
 	#date -s '@2147483647'
-	call(["date","-s","@" + received_time])	 #take pic
+	subprocess.call(["date","-s","@" + received_time])	 #take pic
 	
 
 def sync_with_server():
@@ -354,33 +382,72 @@ def flatten(current, key, result):
 
 def csv_handler():
 	with open(filename,'a', newline='') as csvfile:
-		csvwriter = csv.writer(csvfile,['temp_sensor_1','temp_sensor_2'])
-		csvwriter.writerow(flatten(garden_settings, '', {}))
+		csvwriter = csv.writer(csvfile)
+		time = str(timer.time())
+		time_pretty = str(datetime.now())
+		for i in actuator_state:
+			actuator_state[i] = 1 if actuator_state[i] == True else 0	#convert bools to 1/0 for excel
+			
+		row = [time, time_pretty, garden_settings["temp"]["sensor_1"], garden_settings["temp"]["sensor_2"], garden_settings["water"]["sensor_1"], garden_settings["water"]["sensor_2"], garden_settings["light_1"]["sensor_1"], garden_settings["light_2"]["sensor_1"], actuator_state['heater'], actuator_state['lamp_1'], actuator_state['lamp_2'], actuator_state['pump'] ]
+		print(row)
+		
+		csvwriter.writerow(row)
 		 
 #SCRIPT BEGINS HERE	
+
 		
 logger = set_up_logging()
 logger.info("Starting up garden program")
-sync_time_from_server()
 
 #init csv
-filename = "garden_log_" + str(datetime.now()) + ".txt"
+filename = "garden_log_" + str(datetime.now()) + ".csv"
 with open(filename,'w', newline='') as csvfile:
-		csvwriter = csv.writer(csvfile)
-		csvwriter.writerow([["header"]])
+	csvwriter = csv.writer(csvfile)
+	csvwriter.writerow(['time(s)','time pretty','temp_sensor_1','temp_sensor_2','water_sensor_1','water_sensor_2','light_1_sensor','light_2_sensor','heater_state','lamp_1_state','lamp_2_state','pump_state'])
 
 setup_io_init()
+#pdb.set_trace()
+mode = sys.argv
+mode = mode[1]
+print("current time is: " + str(timer.time()))
+if mode == 'server':
+	logger.info("Server mode")
 
-#main loop
-while(1):
-	read_all_sensors()
-	sync_with_server()
+	sync_time_from_server()
+	#main loop
+	while(True):
+		read_all_sensors()
+		sync_with_server()
+		
+		handle_heating()
+		handle_lighting()
+		#pretty(garden_settings)
+		csv_handler()
+		#print(garden_settings['light_1']['setpoint/power'])
+		check_for_bug()
+		#handle_watering()
+		
+elif mode == 'logger':
+	#explicitly set automode params here for logger mode:
+	garden_settings["temp"]["control_method"] = "auto"
+	garden_settings["temp"]["setpoint/power"] = 26
+	garden_settings["light_1"]["control_method"] = "auto"
+	garden_settings["light_1"]["setpoint/power"] = 300
+	garden_settings["light_2"]["control_method"] = "auto"
+	garden_settings["light_2"]["setpoint/power"] = 300
+	garden_settings["water"]["control_method"] = "auto"
+	garden_settings["water"]["setpoint/power"] = 300
 	
-	handle_heating()
-	handle_lighting()
-	#pretty(garden_settings)
-	csv_handler()
-	#print(garden_settings['light_1']['setpoint/power'])
-	check_for_bug()
-	#handle_watering()
-	
+	logger.info("Logger mode")
+
+	starttime=timer.time()
+	while True:
+		#print ('tick')
+		read_all_sensors()
+		handle_heating()
+		handle_lighting()
+		csv_handler()
+		timer.sleep(LOGGER_INTERVAL - ((timer.time() - starttime) % LOGGER_INTERVAL))
+
+else:
+	print("No mode specified")
