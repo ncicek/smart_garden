@@ -18,6 +18,9 @@ import csv
 
 #CONSTANTS
 LOGGER_INTERVAL = 1.0 #used in logger mode seconds
+PUMP_TIMER_INTERVAL = 2 #seconds to keep on pump for one cycle
+WATER_TIMER_INTERVAL = 1*60*60 #12hrs
+
 
 NUM_SAMPLES_AVG = 20 #number of readings to average upon any ADC reading
 ADC_DELAY = 0.005
@@ -65,6 +68,10 @@ actuator_state = {
 }
 
 server_URL = "http://192.168.1.102:5000"
+
+current_time = timer.time()
+previous_time = timer.time()
+previous_pump_time = 0
 
 garden_settings = {
 	#enviornmental_variables
@@ -239,19 +246,26 @@ def adc_to_lux (ADC, R):
 	return(lux)
 	
 def adc_to_humidity(ADC):
-	return ADC
+	return ADC*100/1.8
 	
 def handle_watering():
-	WATER_TIMER_INTERVAL = 12*60*60 #12hrs
+	global current_time #YOLO
+	global previous_time #YOLO
+	global previous_pump_time
 	
-	handle_watering.current_time = vars(handle_watering).setdefault('current_time',-1)	#init static var
-	handle_watering.previous_time = vars(handle_watering).setdefault('previous_time',-1)	#init static var
-	
-	if handle_watering.current_time > (handle_watering.previous_time + WATER_TIMER_INTERVAL):		
-		previous_time = current_time;
-		water_pump(50);
+	current_time = timer.time() 
+
+	if current_time > (previous_time + WATER_TIMER_INTERVAL):	
+		if (garden_settings['water']['sensor_1'] < garden_settings['water']['setpoint/power']) or (garden_settings['water']['sensor_2'] < garden_settings['water']['setpoint/power']):
+			previous_time = current_time
+			actuator_state['pump'] = True	
+		
+	if actuator_state['pump'] and (current_time < (previous_time + PUMP_TIMER_INTERVAL)):
+		previous_pump_time = current_time
+		water_pump(50)
 	else:
-		water_pump(0);
+		actuator_state['pump'] = False
+		water_pump(0)
 
 def handle_lighting():
 	#auto mode
@@ -283,7 +297,6 @@ def handle_lighting():
 def handle_heating():
 	#auto mode
 	if garden_settings["temp"]["control_method"] == "auto":
-		print(garden_settings["temp"]["sensor_1"],garden_settings["temp"]["sensor_2"],garden_settings['temp']['setpoint/power'])
 		if (garden_settings["temp"]["sensor_1"] > garden_settings['temp']['setpoint/power'] or garden_settings['temp']['sensor_2'] > garden_settings['temp']['setpoint/power']):
 			heater(False)
 		else:
@@ -430,13 +443,13 @@ if mode == 'server':
 elif mode == 'logger':
 	#explicitly set automode params here for logger mode:
 	garden_settings["temp"]["control_method"] = "auto"
-	garden_settings["temp"]["setpoint/power"] = 26
+	garden_settings["temp"]["setpoint/power"] = 25
 	garden_settings["light_1"]["control_method"] = "auto"
-	garden_settings["light_1"]["setpoint/power"] = 300
+	garden_settings["light_1"]["setpoint/power"] = 100
 	garden_settings["light_2"]["control_method"] = "auto"
-	garden_settings["light_2"]["setpoint/power"] = 300
+	garden_settings["light_2"]["setpoint/power"] = 100
 	garden_settings["water"]["control_method"] = "auto"
-	garden_settings["water"]["setpoint/power"] = 300
+	garden_settings["water"]["setpoint/power"] = 56
 	
 	logger.info("Logger mode")
 
@@ -446,6 +459,7 @@ elif mode == 'logger':
 		read_all_sensors()
 		handle_heating()
 		handle_lighting()
+		handle_watering()
 		csv_handler()
 		timer.sleep(LOGGER_INTERVAL - ((timer.time() - starttime) % LOGGER_INTERVAL))
 
