@@ -121,7 +121,7 @@ def set_up_logging():
 
 	# Combined logger used elsewhere in the script
 	logger = logging.getLogger('garden-log')
-	logger.setLevel(logging.INFO)
+	logger.setLevel(logging.ERROR)
 	logger.addHandler(file_handler)	#log to both display and file
 	logger.addHandler(stdout_handler)
 
@@ -256,7 +256,7 @@ def handle_watering():
 	current_time = timer.time() 
 
 	if current_time > (previous_time + WATER_TIMER_INTERVAL):	
-		if (garden_settings['water']['sensor_1'] < garden_settings['water']['setpoint/power']) or (garden_settings['water']['sensor_2'] < garden_settings['water']['setpoint/power']):
+		if (garden_settings['water']['sensor_1'] < garden_settings['water']['setpoint/power']) and (garden_settings['water']['sensor_2'] < garden_settings['water']['setpoint/power']):
 			previous_time = current_time
 			actuator_state['pump'] = True	
 		
@@ -443,7 +443,7 @@ if mode == 'server':
 elif mode == 'logger':
 	#explicitly set automode params here for logger mode:
 	garden_settings["temp"]["control_method"] = "auto"
-	garden_settings["temp"]["setpoint/power"] = 25
+	garden_settings["temp"]["setpoint/power"] = 28.5
 	garden_settings["light_1"]["control_method"] = "auto"
 	garden_settings["light_1"]["setpoint/power"] = 100
 	garden_settings["light_2"]["control_method"] = "auto"
@@ -463,5 +463,7 @@ elif mode == 'logger':
 		csv_handler()
 		timer.sleep(LOGGER_INTERVAL - ((timer.time() - starttime) % LOGGER_INTERVAL))
 
+elif mode == 'pdb':
+	pdb.set_trace()
 else:
 	print("No mode specified")
