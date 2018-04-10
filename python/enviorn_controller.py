@@ -14,7 +14,8 @@ import subprocess
 import urllib.request
 import json
 import csv
-
+from PIL import Image
+import numpy as np
 
 #CONSTANTS
 LOGGER_INTERVAL = 1.0 #used in logger mode seconds
@@ -22,7 +23,7 @@ PUMP_TIMER_INTERVAL = 2 #seconds to keep on pump for one cycle
 WATER_TIMER_INTERVAL = 1*60*60 #12hrs
 
 
-NUM_SAMPLES_AVG = 20 #number of readings to average upon any ADC reading
+NUM_SAMPLES_AVG = 15 #number of readings to average upon any ADC reading
 ADC_DELAY = 0.005
 
 #ABSTRACT PINS INTO BOARD CONNECTOR NAMES
@@ -38,7 +39,12 @@ RES_SENSOR_3 = "P9_37"
 RES_SENSOR_4 = "P9_35"
 VOLT_SENSOR_1 = "P9_38"
 VOLT_SENSOR_2 = "P9_40"
-
+try:
+	image_ref = Image.open('bug.jpg')
+	image_ref = np.asarray(image_ref.convert('L'))
+	image_ref = image_ref.astype(np.int16)
+except FileNotFoundError:
+	image_ref = None
 #ABSTRACT BOARD CONNECTOR NAMES INTO PERIHPERALS
 HEATER = RELAY2
 LAMP_1 = RELAY3
@@ -67,11 +73,13 @@ actuator_state = {
 	'pump':False
 }
 
-server_URL = "http://192.168.1.102:5000"
+server_URL = "http://192.168.1.105	:5000"
 
 current_time = timer.time()
 previous_time = timer.time()
 previous_pump_time = 0
+day_counter = 0
+displaced_water_litres = 0
 
 garden_settings = {
 	#enviornmental_variables
@@ -104,7 +112,8 @@ garden_settings = {
 	},
 	
 	'bugs':{
-		'level':0
+		'worm_level':0,
+		'spider_level':0
 	}
 }
 
@@ -252,17 +261,24 @@ def handle_watering():
 	global current_time #YOLO
 	global previous_time #YOLO
 	global previous_pump_time
+	global day_counter
+	global displaced_water_litres
 	
 	current_time = timer.time() 
+	if math.floor((current_time - start_time) / (60*60*24)):
+		day_counter = day_counter + 1;
+		displaced_water_litres = 0 #reset water displacement every day
 
 	if current_time > (previous_time + WATER_TIMER_INTERVAL):	
 		if (garden_settings['water']['sensor_1'] < garden_settings['water']['setpoint/power']) and (garden_settings['water']['sensor_2'] < garden_settings['water']['setpoint/power']):
-			previous_time = current_time
-			actuator_state['pump'] = True	
+			if displaced_water_litres < 0.3:
+				previous_time = current_time
+				actuator_state['pump'] = True	
 		
 	if actuator_state['pump'] and (current_time < (previous_time + PUMP_TIMER_INTERVAL)):
 		previous_pump_time = current_time
 		water_pump(50)
+		displaced_water_litres = displaced_water_litres + (4.5 * PUMP_TIMER_INTERVAL * .8 / 60.0) #.8 is a fudge factor to account for power limit
 	else:
 		actuator_state['pump'] = False
 		water_pump(0)
@@ -308,26 +324,28 @@ def handle_heating():
 	
 #take a pic, send to server and return bug state
 def check_for_bug():
+	global image_ref
 	logger.debug('checking for bug')
 	#curl -F "file=@image.jpg" http://localhost:5000/garden/upload
 
 	logger.debug('fswebcam')
 	subprocess.check_output(["fswebcam","--no-banner","-r 640x480","bug.jpg"])	 #take pic
-	logger.debug('curling')
-	bug_response = subprocess.check_output(["curl","-F","file=@bug.jpg",server_URL+"/garden/upload"])	#upload to server
-	bug_response = bug_response.decode('UTF-8')
-	logger.debug('got curl response')
-	if bug_response == "detected worm":
-		garden_settings["bugs"]["level"] = 100
-		print("Detected Bug!")
-		return True
-	elif bug_response == "no worm detected":
-		garden_settings["bugs"]["level"] = 0
-		print("No worm")
-		return False
-	else:
-		raise
-
+	image_curr = Image.open('bug.jpg')
+	image_curr = np.asarray(image_curr.convert('L'))
+	image_test = image_curr.astype(np.int16) #this array will be sent to be compared with the previous image
+	#pdb.set_trace()
+	if check_diff_in_img(image_test,image_ref):
+		logger.debug('curling')
+		print("writing file to server")
+		bug_response = subprocess.check_output(["curl","-F","file=@bug.jpg",server_URL+"/garden/upload"])	#upload to server
+		bug_response = bug_response.decode('UTF-8')
+		logger.debug('got curl response')
+		print(bug_response)
+		if bug_response == "OK":
+			print("ok")
+		else:
+			raise
+	image_ref = image_test
 		
 def sync_time_from_server():
 	received_time = urllib.request.urlopen(server_URL + "/garden/time").read().decode()
@@ -348,7 +366,8 @@ def sync_with_server():
 	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/water/sensor_2/" + str(garden_settings["water"]["sensor_2"])).read()
 	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/light_1/sensor_1/" + str(garden_settings["light_1"]["sensor_1"])).read()
 	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/light_2/sensor_1/" + str(garden_settings["light_2"]["sensor_1"])).read()
-	urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/bugs/level/" + str(garden_settings["bugs"]["level"])).read()
+	#urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/bugs/spider_level/" + str(garden_settings["bugs"]["spider_level"])).read()
+	#urllib.request.urlopen(server_URL + "/garden_RESTful_write" + "/bugs/worm_level/" + str(garden_settings["bugs"]["worm_level"])).read()
 	
 	#download json response
 	logger.debug('downloading setpoints')
@@ -365,8 +384,24 @@ def sync_with_server():
 	garden_settings["light_1"]["control_method"] = json_response_dict["light_1"]["control_method"]
 	garden_settings["light_2"]["setpoint/power"] = json_response_dict["light_2"]["setpoint/power"]
 	garden_settings["light_2"]["control_method"] = json_response_dict["light_2"]["control_method"]
-		
+	garden_settings["bugs"]["spider_level"] = json_response_dict["bugs"]["spider_level"]
+	garden_settings["bugs"]["worm_level"] = json_response_dict["bugs"]["worm_level"]
 	
+		
+def check_diff_in_img(img1,img2): 
+	diff = img1 - img2 
+	diff = np.absolute(diff)
+	J = 0
+	rows = diff.shape[0]
+	columns = diff.shape[1]
+	J = np.sum(diff) #sums up all elements in difference image
+	threshold = 0.1*(rows*columns*255)
+	if (J >= threshold):
+		return 1
+	else:
+		return 0
+
+
 def read_all_sensors():
 	#read all sensors and update the garden_settings dictionary
 	garden_settings["temp"]["sensor_1"] = read_temp_sensor(TEMP_SENSOR_1)
@@ -401,7 +436,7 @@ def csv_handler():
 		for i in actuator_state:
 			actuator_state[i] = 1 if actuator_state[i] == True else 0	#convert bools to 1/0 for excel
 			
-		row = [time, time_pretty, garden_settings["temp"]["sensor_1"], garden_settings["temp"]["sensor_2"], garden_settings["water"]["sensor_1"], garden_settings["water"]["sensor_2"], garden_settings["light_1"]["sensor_1"], garden_settings["light_2"]["sensor_1"], actuator_state['heater'], actuator_state['lamp_1'], actuator_state['lamp_2'], actuator_state['pump'] ]
+		row = [time, time_pretty, garden_settings["temp"]["sensor_1"], garden_settings["temp"]["sensor_2"], garden_settings["water"]["sensor_1"], garden_settings["water"]["sensor_2"], garden_settings["light_1"]["sensor_1"], garden_settings["light_2"]["sensor_1"], actuator_state['heater'], actuator_state['lamp_1'], actuator_state['lamp_2'], actuator_state['pump'], displaced_water_litres ]
 		print(row)
 		
 		csvwriter.writerow(row)
@@ -416,12 +451,14 @@ logger.info("Starting up garden program")
 filename = "garden_log_" + str(datetime.now()) + ".csv"
 with open(filename,'w', newline='') as csvfile:
 	csvwriter = csv.writer(csvfile)
-	csvwriter.writerow(['time(s)','time pretty','temp_sensor_1','temp_sensor_2','water_sensor_1','water_sensor_2','light_1_sensor','light_2_sensor','heater_state','lamp_1_state','lamp_2_state','pump_state'])
+	csvwriter.writerow(['time(s)','time pretty','temp_sensor_1','temp_sensor_2','water_sensor_1','water_sensor_2','light_1_sensor','light_2_sensor','heater_state','lamp_1_state','lamp_2_state','pump_state','displaced_water_litres'])
 
 setup_io_init()
+start_time = timer.time()
 #pdb.set_trace()
 mode = sys.argv
 mode = mode[1]
+camera_timer = timer.time()
 print("current time is: " + str(timer.time()))
 if mode == 'server':
 	logger.info("Server mode")
@@ -437,19 +474,21 @@ if mode == 'server':
 		#pretty(garden_settings)
 		csv_handler()
 		#print(garden_settings['light_1']['setpoint/power'])
-		check_for_bug()
+		if (timer.time() - camera_timer >= 3): #take a picture every 3 seconds
+			check_for_bug()
+			camera_timer = timer.time()
 		#handle_watering()
 		
 elif mode == 'logger':
 	#explicitly set automode params here for logger mode:
 	garden_settings["temp"]["control_method"] = "auto"
-	garden_settings["temp"]["setpoint/power"] = 28.5
+	garden_settings["temp"]["setpoint/power"] = 30
 	garden_settings["light_1"]["control_method"] = "auto"
 	garden_settings["light_1"]["setpoint/power"] = 100
 	garden_settings["light_2"]["control_method"] = "auto"
 	garden_settings["light_2"]["setpoint/power"] = 100
 	garden_settings["water"]["control_method"] = "auto"
-	garden_settings["water"]["setpoint/power"] = 56
+	garden_settings["water"]["setpoint/power"] = 68.8
 	
 	logger.info("Logger mode")
 
@@ -467,3 +506,4 @@ elif mode == 'pdb':
 	pdb.set_trace()
 else:
 	print("No mode specified")
+	
