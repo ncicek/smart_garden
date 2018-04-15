@@ -17,7 +17,7 @@ import os
 from flask import Flask, jsonify,send_from_directory, request,redirect,url_for
 from werkzeug.utils import secure_filename
 import time
-
+from threading import Lock
 
 if tf.__version__ < '1.4.0':
   raise ImportError('Please upgrade your tensorflow installation to v1.4.* or later!')
@@ -29,6 +29,7 @@ from utils import label_map_util
 
 from utils import visualization_utils as vis_util
 
+mutex = Lock()
 
 
 def run_inference_for_single_image(image, graph):
@@ -90,19 +91,25 @@ def findWorm(image_path):
 	# Actual detection.
 	output_dict = run_inference_for_single_image(image_np, detection_graph)
 	# Visualization of the results of a detection.
-	detection_scores = output_dict['detection_scores'];
-	return detection_scores
+	confidence_level = output_dict['detection_scores'][0];
+	class_name = output_dict['detection_classes'][0] 
+	result = [confidence_level,class_name]
+	return result
   
  
 UPLOAD_FOLDER = 'pics/' #directory which contains all the saved files from clients
 ALLOWED_EXTENSIONS = set([ 'png', 'jpg', 'jpeg',]) #self exploratory
+
+garden_settings = {}
+
+
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 
 
-garden_settings = {}
+
 
 @app.route('/')
 def index():
@@ -122,15 +129,31 @@ def upload_file():
 			return 'not found'
 		file = request.files['file']
 		if file.filename == '':
-			return 'not found1'
+			return 'not found'
 		if file and allowed_file(file.filename):
 			filename = secure_filename(file.filename)
 			print(filename)
 			path_to_file = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 			file.save(path_to_file)
 			print("save complete")
-			detection_scores = findWorm(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-			return str(detection_scores)
+			result = findWorm(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+			mutex.acquire()
+			if (result[0] > 0.5 ):
+				if (str(result[1]) == '1'):
+					print("we are in worm")
+					garden_settings["bugs"]["worm_level"] = 1
+					garden_settings["bugs"]["spider_level"] = 0
+				elif (str(result[1]) == '2'):
+					print("we are in spider")
+					garden_settings["bugs"]["spider_level"] = 1
+					garden_settings["bugs"]["worm_level"] = 0
+			else:
+				print("we are in background")
+				garden_settings["bugs"]["worm_level"] = 0
+				garden_settings["bugs"]["worm_level"] = 0
+			mutex.release()
+			print("class: " + str(result[1])  + " confidence level: " +str(result[0]) )
+			return "OK"
 
 
 @app.route('/garden/uploads/<filename>')
@@ -145,11 +168,13 @@ def get_setting(enviornmental_variable, parameter):
 			return(str(garden_settings[enviornmental_variable][parameter]))
 	return 'error'
 
-@app.route('/garden/<string:enviornmental_variable>/<string:mode>/<int:val>', methods=['GET'])
+@app.route('/garden/<string:enviornmental_variable>/<string:mode>/<string:val>', methods=['GET'])
 def set_setting(enviornmental_variable, mode, val):
 	if mode in ['auto', 'manual'] and enviornmental_variable in garden_settings:	#at least try some input protection
-		garden_settings[enviornmental_variable]['control_method'] = mode;
-		garden_settings[enviornmental_variable]['setpoint/power'] = val;
+		mutex.acquire()
+		garden_settings[enviornmental_variable]['control_method'] = mode
+		garden_settings[enviornmental_variable]['setpoint/power'] = float(val)
+		mutex.release()
 	else:
 		print("error: failed mode check or variable check")
 		return 'error'
@@ -159,7 +184,9 @@ def set_setting(enviornmental_variable, mode, val):
 def set_setting_RESTful(enviornmental_variable, param, val):
 	if enviornmental_variable in garden_settings:
 		if param in garden_settings[enviornmental_variable]:
+			mutex.acquire()
 			garden_settings[enviornmental_variable][param] = float(val);
+			mutex.release()
 	else:
 		print("error: failed restful dict check")
 		return 'error'
@@ -182,32 +209,33 @@ def reset_settings():
 			
 		'temp':{
 			'control_method':'auto',	#manual vs auto
-			'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
-			'sensor_1':10,
-			'sensor_2':20
+			'setpoint/power':30,	#interpreted as setpoint if auto mode, or power if manual mode
+			'sensor_1':24.90405,
+			'sensor_2':23.40944
 		},
 		
 		'water':{
 			'control_method':'auto',	#manual vs auto
 			'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
-			'sensor_1':10,
-			'sensor_2':20
+			'sensor_1':48.70818,
+			'sensor_2':69.27147
 		},
 		
 		'light_1':{
 			'control_method':'auto',	#manual vs auto
-			'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
-			'sensor_1':10
+			'setpoint/power':100,	#interpreted as setpoint if auto mode, or power if manual mode
+			'sensor_1':139.05043
 		},
 		
 		'light_2':{
 			'control_method':'auto',	#manual vs auto
-			'setpoint/power':0,	#interpreted as setpoint if auto mode, or power if manual mode
-			'sensor_1':10
+			'setpoint/power':100,	#interpreted as setpoint if auto mode, or power if manual mode
+			'sensor_1':254.63846
 		},
 		
 		'bugs':{
-			'level':0
+			'worm_level':0,
+			'spider_level':0
 		}
 	}
 	return "Settings reset."
@@ -223,12 +251,16 @@ def get_time():
 	return str(int(time.time()))
 
 
+@app.route('/garden/model_name', methods=['GET'])
+def get_name():
+	return str(UPLOAD_FOLDER)
+	
 if __name__ == '__main__':
-	MODEL_NAME = 'worm_graph'
+	MODEL_NAME = 'bugs_detector'
 	MODEL_FILE = MODEL_NAME + '.tar.gz'
 	PATH_TO_CKPT = MODEL_NAME + '/frozen_inference_graph.pb'
 	PATH_TO_LABELS = os.path.join('training', 'object-detection.pbtxt')
-	NUM_CLASSES = 1
+	NUM_CLASSES = 2
 	detection_graph = tf.Graph()
 	with detection_graph.as_default():
 		od_graph_def = tf.GraphDef()
@@ -243,4 +275,5 @@ if __name__ == '__main__':
 	IMAGE_SIZE = (12, 8)
 	reset_settings()
 	app.run(debug=True, host='0.0.0.0',threaded=True)
+
 
